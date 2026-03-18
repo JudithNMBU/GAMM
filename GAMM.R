@@ -40,8 +40,6 @@ output_today
 
 
 ### PREP FOR GAMM ###
-
-
 #upload csv files
 cm <- read.csv("C:/Users/apmc/OneDrive - Norwegian University of Life Sciences/BatLab Norway/Projects/CoastalMonitoring/Analyses/Judith 6 lakes/JF_inputs/final_cm 1.csv")
 # 468400 obs of 39 vars
@@ -85,6 +83,8 @@ summary(enil_glm)
 ### DATA WRESTLE ###
 
 # calculates the match ratio cut-off by inverting the logistic regression
+# "model" is an R object that represents a fitted logistic regression model 
+# "p" is a probability ratio (between 0 and 1)
 get_cutoff <- function(p, model) {
   beta0 <- coef(model)[1]
   beta1 <- coef(model)[2]
@@ -114,7 +114,12 @@ loss_table <- data.frame(Probability = target_probs) %>%
   )
 
 print(loss_table)
-
+# Probability Cutoff_Ratio Calls_retained Calls_lost Percent_loss
+# 1         0.5    0.0727363           7085          0         0.00
+# 2         0.6    0.2486550           7085          0         0.00
+# 3         0.7    0.4403525           7055         30         0.42
+# 4         0.8    0.6742063           6448        637         8.99
+# 5         0.9    1.0000000           2809       4276        60.35
 
 
 # prep auto.data
@@ -131,15 +136,51 @@ auto.reduced <- auto.data %>%
 
 summary(auto.reduced)
 dim(auto.reduced)
-
+# 769409     11
 
 # define cut-offs
 cutoff_enil  <- 0.66
 cutoff_ppyg  <- 0.76
 
-## Before you filter, you should make sure you have not lost anny manually verified recordings! 
+## Before you filter, you should make sure you have not lost any manually verified recordings! 
+temp <- cm %>% dplyr::filter(manual.id != "NA") 
+temp1<- cm %>% dplyr::filter(manual.id != "NA") %>% dplyr::mutate(IN.FILE = factor(IN.FILE)) 
+# 50545 obs 
+summary(temp1)
+# there are only 36920 unique files... where are these duplicates coming from? 
 
-## Note to self - start here and test if any manually verified passes are lost. 
+templist <- temp1$IN.FILE
+templist <- unique(temp1$IN.FILE)
+head(templist)
+# 36920 obs unique files... why are there so many duplicates...? 
+
+dup_rows <- duplicated(temp1$IN.FILE) | duplicated(temp1$IN.FILE, fromLast = TRUE)
+
+# Subset the data frame to keep only those rows
+duplicates <- temp1[dup_rows, ]
+duplicates$SITE <- factor(duplicates$SITE)
+# 25004 duplicates? 
+
+summary(duplicates)
+# CM-04 CM-05 CM-06 CM-21 CM-23 CM-42 
+# 1626   760  6719  4868  1842  9189
+
+dups <- duplicates %>% dplyr::select(c(IN.FILE, SITE, DATE, TIME, AUTO.ID, manual.id, behavior, final.id))
+summary(duplicates$SITE)
+## double check that these were all observations of multiple bat taxa in single recordings
+
+dups1 <- dups %>% dplyr::select(IN.FILE, AUTO.ID, manual.id) %>% dplyr::distinct()
+# There are no duplicates here now, so it is all different bat taxa detected in the manual verification process. Coool beans. 
+
+## Now we want to make sure that these 36920 manually verified files are retained in the following filtering process: 
+manual.files <- unique(temp$IN.FILE)
+# 36920 unique file names 
+
+## Save these separately with the other relevant data: 
+
+manual.fix <- cm %>% dplyr::filter(IN.FILE %in% manual.files) %>% droplevels()
+dim(manual.fix)
+# 50545    39
 
 #filter autoIDs for species and cut-off
 auto.filtered <- auto.reduced %>%
@@ -147,24 +188,144 @@ auto.filtered <- auto.reduced %>%
     (auto.id == "ENIL" & MATCH.RATIO >= cutoff_enil) |
       (auto.id == "PPYG" & MATCH.RATIO >= cutoff_ppyg))
 
-# remove manual IDs to avoid duplicates, insert remaining taxa from auto.id to final.id
-manual.files <- unique(cm$IN.FILE)
+test <- auto.filtered %>% dplyr::filter(IN.FILE %in% manual.files)
+#9218 obs of 11 variables. 
+36920-9218 
+# with your current pipeline, you lose 27702 manually verified files, which we do not want to have happen. 
 
-## These are the 
-auto.new <- auto.filtered %>%
-  dplyr::filter(!(IN.FILE %in% manual.files)) %>%
-  dplyr::mutate(
-    final.id = auto.id)
-dim(auto.new)
-# 56155    12
+# so lets try it another way: 
 
-# add final.id and insert taxa from manual.id
-cm <- cm %>%
-  mutate(
-    final.id = manual.id)
+#first remove all the manually verified files
+auto.fix <- auto.reduced %>% dplyr::filter(!IN.FILE %in% manual.files) 
 
-# combine
-combi_cm <- bind_rows(cm, auto.new)
+dim(auto.fix)
+# 732489     11
+dim(auto.reduced)
+# 769409     11
+
+dim(auto.filtered)
+# 483228     11
+
+## Check that the math makes sense
+# N obs in aut.reduced - n files with manual.ids
+769409 - 36920
+# 732489 - good it makes sense. 
+
+## Now add the cutoffs to auto.fix 
+auto.fix1 <- auto.fix %>%  dplyr::filter(
+  (auto.id == "ENIL" & MATCH.RATIO >= cutoff_enil) |
+    (auto.id == "PPYG" & MATCH.RATIO >= cutoff_ppyg))
+
+dim(auto.fix1)
+# 474010     11
+dim(auto.filtered)
+# 483228     11
+
+## Now combine back with the manual ids 
+summary(manual.fix)
+summary(auto.fix1)
+
+manual.fix1 <- manual.fix %>% dplyr::select(IN.FILE, DATE, TIME, HOUR, DATE.12, TIME.12, HOUR.12, AUTO.ID., SITE, MATCH.RATIO, auto.id, manual.id) %>% 
+  dplyr::rename(site = SITE) %>% droplevels()
+
+summary(manual.fix1)
+summary(auto.fix1)
+str(manual.fix1)
+str(auto.fix1)
+
+dim(manual.fix1)
+# 50545
+
+dim(auto.fix1)
+# 474010
+
+50545 + 474010
+# 524555 
+## Now these match 
+
+summary(cm)
+#housekeeping
+auto.new1 <- auto.new1 %>% dplyr::mutate(AUTO.ID. = factor(AUTO.ID.), 
+                                         auto.id = factor(auto.id), 
+                                         manual.id = factor(manual.id)) 
+
+summary(auto.new1)
+# 474010   NAs in the manual ids, for the 474010 added autoids 
+# The math checks out!
+
+# Now final id - remember to not over-write your own manual ids. 
+auto.new2 <- auto.new1 %>% dplyr::mutate(
+  final.id = factor(dplyr::case_when(
+    is.na(manual.id) ~ auto.id, 
+    TRUE ~ manual.id)))
+
+summary(auto.new2$manual.id)
+summary(auto.new2$final.id)
+
+#     ?   ENIL   MDAU   MYSP   NNOC   NoID  Noise   NYCT   PAUR   PISP   PNAT   PPYG   VMUR   NA's 
+#    104  16058      3   6431     26    355   2227   3279     27    407   7287  14340      1 474010 
+# > summary(auto.new2$final.id)
+#   ENIL   PPYG      ?   MDAU   MYSP   NNOC   NoID  Noise   NYCT   PAUR   PISP   PNAT   VMUR 
+# 423131  81277    104      3   6431     26    355   2227   3279     27    407   7287      1 
+
+## Now we need to get back the information from the cm data object that we want for modellling 
+
+# Combine the filtered autoids with the manual ids 
+DF <- dplyr::full_join(auto.new2, manual.fix1)
+dim(DF)
+# 524555     13
+# The math checks out!
+
+summary(DF)
+summary(DF$final.id)
+str(DF)
+
+meta <- cm %>% dplyr::select(c(IN.FILE, mean_temp, mean_wind)) %>% dplyr::distinct()
+
+dim(meta)
+# 454775 
+
+summary(meta)
+
+dim(DF)
+# 524555     13
+
+summary(DF)
+
+combi_cm <- dplyr::left_join(DF, meta, by = "IN.FILE")
+dim(combi_cm)
+summary(combi_cm)
+# 15435 filenames are not matching, resulting in 56155 NA weather columns...
+
+test <- combi_cm %>% dplyr::filter(is.na(MATCH.RATIO)) 
+summary(test) # - these have weather data... 
+
+test2 <- combi_cm %>% dplyr::filter(is.na(mean_temp)) 
+
+testfiles <- test2$IN.FILE
+head(testfiles)
+
+test3 <- cm %>% dplyr::filter(IN.FILE %in% testfiles) # how can these not exist in the cm files? 
+
+############# Judith's original work flow: ############# 
+# summary(auto.new1)
+# ## These are the 
+# auto.new <- auto.filtered %>%
+#   dplyr::filter(!(IN.FILE %in% manual.files)) %>%
+#   dplyr::mutate(
+#     final.id = auto.id) 
+# dim(auto.new)
+# # 56155    12
+
+# add final.id and insert taxa from manual.id # 
+# cm <- cm %>%
+#   mutate(
+#     final.id = manual.id)
+
+# # combine
+# combi_cm <- bind_rows(cm, auto.new)
+#############  #############  #############  ############# 
+
 
 View(combi_cm)
 table(combi_cm$auto.id) #newly added auto IDs
