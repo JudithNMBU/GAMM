@@ -213,14 +213,14 @@ table(combi_cm$auto.id) #newly added auto IDs
 # confirm date format and create the column night 
 cm$DATE.12 <- as.Date(cm$DATE.12)
 cm <- cm %>% 
-  mutate(night = as.Date(DATE.12))
+  mutate(night = as.Date(DATE.12)) 
 
 
 # only PNAT, group by site&night, count n of bat passes
 pnat_nights <- cm %>%
-  filter(manual.id == "PNAT") %>%
-  group_by(SITE, night) %>%
-  dplyr::summarize(batpass = n(), .groups = "drop")
+  dplyr::filter(manual.id == "PNAT") %>%
+  dplyr::group_by(SITE, night) %>%
+  dplyr::summarize(batpass = dplyr::n(), .groups = "drop")
 
 
 # create timeline
@@ -234,14 +234,19 @@ full_grid <- expand.grid(
 
 # insert pnat data
 data_full <- full_grid %>%
-  left_join(pnat_nights, by = c("SITE", "night"))
+  dplyr::left_join(pnat_nights, by = c("SITE", "night"))
 # adds NAs which will be true zeroes
+
 
 
 # insert true zeroes into grid
 data_full$batpass[
   is.na(data_full$batpass)
 ] <- 0
+
+sum(data_full$batpass)
+# 7287
+
 
 View(data_full)
 
@@ -259,6 +264,19 @@ data_full <- data_full %>%
 data_full$SITE <- as.factor(data_full$SITE)
 
 
+
+### DAT EXPLORATION
+
+sum(data_full$batpass )
+# 7287
+summary(combi_cm$final.id)
+# also 7287 PNAT, so that is good. 
+
+## Check the continuous variables
+hist(data_full$day)
+hist(data_full$batpass)
+
+## Check factor variable(s)
 summary(data_full)
 # SITE        night               batpass            day       
 # CM-04:92   Min.   :2024-07-01   Min.   :  0.00   Min.   : 0.00  
@@ -268,28 +286,48 @@ summary(data_full)
 # CM-23:92   3rd Qu.:2024-09-07   3rd Qu.:  9.25   3rd Qu.:68.25  
 # CM-42:92   Max.   :2024-09-30   Max.   :718.00   Max.   :91.00  
 
-hist(data_full$day)
-hist(data_full$batpass)
-
-## There should *not* be 92 daays for each detector
-
-# Equipment failure dates: 
-# CM-04 -> 16 days in July 2024 (02.-17.07); 25 days in 2025 (ca 08.05-02.06)
-# CM-05 -> 9 days in July 2024 (10.-18.07) and 1 in September (30.09)
-# CM-06 -> 14 days in July 2024 (05.-18.07) and 2 in September (12.-13.09); 13 days in 2025 (ca 20.05-02.06)
-# CM-21 -> 10 days in July 2024 (9.-18.07)
-# CM-23 -> 5 days in August (19.-23.07)
-# CM-42 -> 0
-
-
-ggplot(data_full, aes(x = night, y = batpass)) +
-         geom_point() +
-         facet_wrap(~SITE) + 
-         coord_flip()
-
+## There should *not* be 92 days for each detector
 
 ## OBS! ## 
 ## Need to double check that the nights where detectors were NOT working and we know that are not included here. 
+
+ggplot(data_full, aes(x = night, y = batpass)) +
+  geom_point() +
+  facet_wrap(~SITE) + 
+  coord_flip()
+
+# For CM-23 you can see there are dates with data that should not have, for example
+data_full %>% dplyr::filter(SITE == "CM-23") %>% droplevels() %>% 
+  ggplot() +  geom_point(aes(x=night, y = batpass))
+
+head(data_full)
+
+
+# Equipment failure dates: 
+# CM-04 -> 16 days in July 2024 (02.-17.07); 
+# CM-05 -> 9 days in July 2024 (10.-18.07) and 1 in September (30.09)
+# CM-06 -> 14 days in July 2024 (05.-18.07) and 2 in September (12.-13.09); 
+# CM-21 -> 10 days in July 2024 (9.-18.07)
+# CM-23 -> 5 days in August (19.-23.08)
+# CM-42 -> 0
+
+
+## Here you need to remove nights with detector failures
+test <- data_full %>% dplyr::filter(
+  !(SITE == "CM-04" & night %in% c("2024-07-01", "2024-07-17")),
+  !(SITE == "CM-05" & night %in% c("2024-07-10", "2024-07-18")),
+  !(SITE == "CM-05" & night == "2024-09-30"),
+  !(SITE == "CM-06" & night %in% c("2024-05-07", "2024-05-18")),
+  !(SITE == "CM-06" & night %in% c("2024-09-12", "2024-09-13")),
+  !(SITE == "CM-21" & night %in% c("2024-09-09", "2024-09-18")),
+  !(SITE == "CM-23" & night %in% c("2024-08-09", "2024-08-23")),
+)
+sum(test$batpass)
+#7204 
+# 7287- 7204 - 83 bat passes lost 
+
+# find out which dates we need to adjust for the night-1 day effect, 
+# then re-build your data object. 
 
 #scatterplot
 library(ggplot2)
@@ -312,6 +350,7 @@ poisson <- gam(
 
 #check overdipersion
 deviance(poisson) / df.residual(poisson)
+# 27.08
 #that's a lot of overdispersion, move on to NB
 
 
@@ -360,3 +399,4 @@ plot(sm(v_nb, 1)) +
   labs(title = "Seasonal Trend of PNAT Activity", 
        x = "Day of Sampling Period", 
        y = "Number of expected Bat Passes")
+
