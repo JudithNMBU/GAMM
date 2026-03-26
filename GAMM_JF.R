@@ -202,7 +202,6 @@ summary(combi_cm$manual.id)
 # 56155
 
 ## but in the end there should be no NAs at this point. We should drop what is left. 
-
 View(combi_cm)
 table(combi_cm$auto.id) #newly added auto IDs
 
