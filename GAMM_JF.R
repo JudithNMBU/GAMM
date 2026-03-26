@@ -275,6 +275,8 @@ summary(combi_cm$final.id)
 hist(data_full$day)
 hist(data_full$batpass)
 
+
+# test# 
 ## Check factor variable(s)
 summary(data_full)
 # SITE        night               batpass            day       
